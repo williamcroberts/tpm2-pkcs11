@@ -114,14 +114,9 @@ CK_RV ssl_util_check_PKCS1_TYPE_2(const CK_BYTE_PTR inbuf, CK_ULONG inlen, CK_UL
 }
 
 static CK_RV do_sig_verify_ec(EVP_PKEY *pkey,
+        const EVP_MD *md,
         CK_BYTE_PTR digest, CK_ULONG digest_len,
         CK_BYTE_PTR signature, CK_ULONG signature_len) {
-
-    EC_KEY *eckey = (EC_KEY *)EVP_PKEY_get0_EC_KEY(pkey);
-    if (!eckey) {
-        LOGE("Expected EC Key");
-        return CKR_GENERAL_ERROR;
-    }
 
     /*
      * OpenSSL expects ASN1 framed signatures, PKCS11 does flat
@@ -136,15 +131,62 @@ static CK_RV do_sig_verify_ec(EVP_PKEY *pkey,
         return rv;
     }
 
-    int rc = ECDSA_do_verify(digest, digest_len, ossl_sig, eckey);
-    if (rc < 0) {
-        ECDSA_SIG_free(ossl_sig);
+    int len =i2d_ECDSA_SIG(ossl_sig, NULL);
+    if (len < 0) {
         SSL_UTIL_LOGE("ECDSA_do_verify failed");
+        ECDSA_SIG_free(ossl_sig);
+        return CKR_GENERAL_ERROR;
+    } else if (len == 0) {
+        LOGE("Expected length to be greater than 0");
+        ECDSA_SIG_free(ossl_sig);
         return CKR_GENERAL_ERROR;
     }
+
+    unsigned char *buf = calloc(1, len);
+    if (!buf) {
+        LOGE("oom");
+        ECDSA_SIG_free(ossl_sig);
+        return CKR_HOST_MEMORY;
+    }
+
+    unsigned char *p = buf;
+    printf("BILL ORIG: %p\n", buf);
+
+    int len2 = i2d_ECDSA_SIG(ossl_sig, &p);
+    if (len2 < 0) {
+        SSL_UTIL_LOGE("ECDSA_do_verify failed");
+        ECDSA_SIG_free(ossl_sig);
+        free(buf);
+        return CKR_GENERAL_ERROR;
+    }
+
+    printf("BILL AFTER: %p\n", buf);
+
+    assert(len == len2);
+
     ECDSA_SIG_free(ossl_sig);
 
-    return rc == 1 ? CKR_OK : CKR_SIGNATURE_INVALID;
+    EVP_PKEY_CTX *pkey_ctx = NULL;
+    rv = ssl_util_setup_evp_pkey_ctx(pkey, 0, md,
+            EVP_PKEY_verify_init, &pkey_ctx);
+    if (rv != CKR_OK) {
+        free(buf);
+        return rv;
+    }
+
+    int rc = EVP_PKEY_verify(pkey_ctx, buf, len2, digest, digest_len);
+    if (rc < 0) {
+        SSL_UTIL_LOGE("EVP_PKEY_verify failed");
+    } else if (rc == 1) {
+        rv = CKR_OK;
+    } else {
+        rv = CKR_SIGNATURE_INVALID;
+    }
+
+    EVP_PKEY_CTX_free(pkey_ctx);
+    free(buf);
+
+    return rv;
 }
 
 #if defined(LIB_TPM2_OPENSSL_OPENSSL_POST300)
@@ -576,7 +618,7 @@ CK_RV ssl_util_sig_verify(EVP_PKEY *pkey,
                 digest, digest_len,
                 signature, signature_len);
     case EVP_PKEY_EC:
-        return do_sig_verify_ec(pkey, digest, digest_len,
+        return do_sig_verify_ec(pkey, md, digest, digest_len,
                 signature, signature_len);
     default:
         LOGE("Unknown PKEY type, got: %d", type);
