@@ -45,8 +45,6 @@ static inline void _str_padded_copy(CK_UTF8CHAR_PTR dst, size_t dst_len, const C
     memcpy(dst, src, src_len);
 }
 
-twist utils_hash_pass(const twist pin, const twist salt);
-
 twist aes256_gcm_decrypt(const twist key, const twist objauth);
 
 twist aes256_gcm_encrypt(twist keybin, twist plaintextbin);

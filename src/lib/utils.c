@@ -7,6 +7,7 @@
 #include <openssl/sha.h>
 
 #include "log.h"
+#include "ssl_util.h"
 #include "token.h"
 #include "utils.h"
 
@@ -45,7 +46,7 @@ CK_RV utils_setup_new_object_auth(twist newpin, twist *newauthhex, twist *newsal
         pin_to_use = newpin;
     }
 
-    *newauthhex = utils_hash_pass(pin_to_use, salt_to_use);
+    *newauthhex = ssl_util_hash_pass(pin_to_use, salt_to_use);
     if (!*newauthhex) {
         goto out;
     }
@@ -326,22 +327,6 @@ out:
 
     return plaintext;
 
-}
-
-twist utils_hash_pass(const twist pin, const twist salt) {
-
-
-    unsigned char md[SHA256_DIGEST_LENGTH];
-
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-
-    SHA256_Update(&sha256, pin, twist_len(pin));
-    SHA256_Update(&sha256, salt, twist_len(salt));
-    SHA256_Final(md, &sha256);
-
-    /* truncate the password to 32 characters */
-    return twist_hex_new((char *)md, sizeof(md)/2);
 }
 
 size_t utils_get_halg_size(CK_MECHANISM_TYPE mttype) {
